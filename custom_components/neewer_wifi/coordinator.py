@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -9,7 +10,7 @@ from typing import TYPE_CHECKING
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import DOMAIN
+from .const import DEFAULT_COMMAND_DELAY, DOMAIN
 from .discovery import async_get_local_networks, async_resolve_client_ip, client_ip_for_host
 from .protocol import (
     NeewerProtocol,
@@ -103,7 +104,9 @@ class NeewerDataUpdateCoordinator(DataUpdateCoordinator[NeewerLightState]):
         )
         temp = kelvin_to_protocol(kelvin)
 
-        await self.protocol.async_power_on(self.host)
+        if not self._state.is_on:
+            await self.protocol.async_power_on(self.host)
+            await asyncio.sleep(DEFAULT_COMMAND_DELAY)
         await self.protocol.async_set_brightness_temp(self.host, bri, temp)
 
         self._state.is_on = True
