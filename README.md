@@ -101,7 +101,7 @@ Other Neewer WiFi models that share the same UDP protocol may work but are not v
 ## Installation (HACS)
 
 1. Open **HACS** → **Integrations** → **Custom repositories**
-2. Add repository URL: `https://github.com/MrCurlsTTV/hacs-neweer-gl1`
+2. Add repository URL: `https://github.com/interactafraz/hacs-neweer-gl1`
 3. Category: **Integration**
 4. Install **Neewer WiFi**
 5. Restart Home Assistant
