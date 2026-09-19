@@ -150,15 +150,15 @@ def _read_route_entries() -> list[RouteEntry]:
     return parse_proc_net_route(content)
 
 
-def _get_iface_ipv4_map() -> dict[str, str]:
-    """Map Linux interface names to private IPv4 addresses."""
+def _get_iface_ipv4_map() -> dict[str, list[str]]:
+    """Map Linux interface names to all private IPv4 addresses configured on them."""
     try:
         import ifaddr
     except ImportError:
         _LOGGER.debug("ifaddr is not available for interface IP lookup")
         return {}
 
-    mapping: dict[str, str] = {}
+    mapping: dict[str, list[str]] = {}
     for adapter in ifaddr.get_adapters():
         for ip_config in adapter.ips:
             if ip_config.is_IPv6:
@@ -167,8 +167,36 @@ def _get_iface_ipv4_map() -> dict[str, str]:
             if isinstance(address, tuple):
                 continue
             if _is_private_ipv4(address):
-                mapping[adapter.name] = address
+                mapping.setdefault(adapter.name, []).append(address)
     return mapping
+
+
+def _select_iface_ip_for_route(
+    candidates: list[str] | None,
+    network: ipaddress.IPv4Network,
+) -> str | None:
+    """Pick whichever candidate address plausibly belongs to the route's subnet.
+
+    An interface can carry several private IPv4 addresses (e.g. a real DHCP
+    address plus a manually added alias for reaching a routed subnet). Which one
+    ifaddr/the kernel lists last is not stable across reboots or reconnects, so
+    picking "the last one found" silently breaks routing whenever the order
+    flips. Instead, prefer the address whose /24 contains the route's
+    destination, since that's the one actually meant for this route.
+    """
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    target = network.network_address
+    for candidate in candidates:
+        try:
+            candidate_net = ipaddress.IPv4Network(f"{candidate}/24", strict=False)
+        except ValueError:
+            continue
+        if target in candidate_net:
+            return candidate
+    return candidates[-1]
 
 
 def parse_ipv4_network(subnet: str) -> ipaddress.IPv4Network:
@@ -273,7 +301,7 @@ async def async_get_discovery_targets(hass: HomeAssistant) -> list[DiscoveryTarg
         network_key = str(route.network)
         if network_key in seen:
             continue
-        client_ip = iface_ips.get(route.iface)
+        client_ip = _select_iface_ip_for_route(iface_ips.get(route.iface), route.network)
         if client_ip is None:
             client_ip = client_ip_for_network(route.network, adapter_pairs)
         if client_ip is None:
