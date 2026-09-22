@@ -13,6 +13,7 @@ from .const import (
     HANDSHAKE_REPEAT,
     HEARTBEAT_ACK,
     HEARTBEAT_INTERVAL,
+    HEARTBEAT_MISS_THRESHOLD,
     HEARTBEAT_PACKET,
     MAX_BRIGHTNESS,
     MAX_COLOR_TEMP_PROTOCOL,
@@ -118,6 +119,7 @@ class NeewerProtocol(asyncio.DatagramProtocol):
         session = self._sessions.get(host)
         if session is not None and is_neewer_response(data):
             session.last_response = data
+            session.last_heartbeat_ack = asyncio.get_running_loop().time()
             _LOGGER.debug("Received %d bytes from %s: %s", len(data), host, data.hex())
 
     def error_received(self, exc: Exception) -> None:
@@ -162,8 +164,10 @@ class NeewerProtocol(asyncio.DatagramProtocol):
         await asyncio.sleep(1.5)
         await self._send(host, WAKEUP_PACKET)
         await asyncio.sleep(1.5)
+        now = asyncio.get_running_loop().time()
         session.connected = True
-        session.last_handshake = asyncio.get_running_loop().time()
+        session.last_handshake = now
+        session.last_heartbeat_ack = now
         _LOGGER.info("Connected to Neewer light at %s", host)
 
     async def async_ensure_connected(self, host: str) -> _LightSession:
@@ -202,15 +206,25 @@ class NeewerProtocol(asyncio.DatagramProtocol):
         _LOGGER.debug("Sent %d bytes to %s:%d", len(data), host, DEFAULT_PORT)
 
     async def _heartbeat_loop(self) -> None:
-        """Send periodic heartbeats and re-handshake stale sessions."""
+        """Send periodic heartbeats and reconnect stale or unresponsive sessions."""
+        heartbeat_timeout = HEARTBEAT_INTERVAL * HEARTBEAT_MISS_THRESHOLD
         try:
             while True:
                 now = asyncio.get_running_loop().time()
                 for host, session in list(self._sessions.items()):
                     if not session.connected:
                         continue
-                    if now - session.last_handshake >= REHANDSHAKE_INTERVAL:
-                        _LOGGER.debug("Periodic re-handshake for %s", host)
+                    stale_handshake = now - session.last_handshake >= REHANDSHAKE_INTERVAL
+                    unresponsive = now - session.last_heartbeat_ack >= heartbeat_timeout
+                    if stale_handshake or unresponsive:
+                        if unresponsive:
+                            _LOGGER.warning(
+                                "No heartbeat response from %s for %.1fs, reconnecting",
+                                host,
+                                now - session.last_heartbeat_ack,
+                            )
+                        else:
+                            _LOGGER.debug("Periodic re-handshake for %s", host)
                         session.connected = False
                         try:
                             await self.async_connect(host, session.client_ip)
@@ -237,6 +251,7 @@ class _LightSession:
         self.client_ip = client_ip
         self.connected = False
         self.last_handshake = 0.0
+        self.last_heartbeat_ack = 0.0
         self.last_response: bytes | None = None
 
 

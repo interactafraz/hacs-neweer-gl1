@@ -6,7 +6,8 @@ DEFAULT_PORT = 5052
 HANDSHAKE_REPEAT = 3
 DEFAULT_COMMAND_DELAY = 0.5
 HEARTBEAT_INTERVAL = 2.0
-REHANDSHAKE_INTERVAL = 1800.0  # 30 minutes
+HEARTBEAT_MISS_THRESHOLD = 3  # consecutive missed heartbeats before reconnecting
+REHANDSHAKE_INTERVAL = 1800.0  # 30 minutes, fallback periodic re-handshake
 
 MIN_BRIGHTNESS = 1
 MAX_BRIGHTNESS = 100
